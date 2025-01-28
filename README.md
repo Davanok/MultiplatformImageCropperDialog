@@ -1,4 +1,4 @@
-![Screenshot_2025-01-28-20-54-59-03_070074f62be0f14a0e85d4363b86ac2c](https://github.com/user-attachments/assets/60744cdc-f40e-4347-8adb-d070ea75f9e5)## Usage
+## Usage
 ```kotlin
 var byteArray by remember { mutableStateOf<ByteArray?>(null) }
 byteArray?.let {
