@@ -1,5 +1,6 @@
 ## Usage
 ```kotlin
+var image by remember { mutableStateOf<ImageBitmap?>(null) }
 var byteArray by remember { mutableStateOf<ByteArray?>(null) }
 byteArray?.let {
   ImageCropDialog(
