@@ -1,15 +1,19 @@
+package // TODO
+
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material3.Icon
@@ -17,6 +21,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -38,9 +43,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.toSize
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import example.fromByteArray
+import example.toByteArray
 import example.composeapp.generated.resources.Res
 import example.composeapp.generated.resources.cancel
 import example.composeapp.generated.resources.character_image
@@ -50,6 +56,9 @@ import example.composeapp.generated.resources.restart_alt
 import example.composeapp.generated.resources.rotate_90_degrees_cw
 import example.composeapp.generated.resources.rotate_left
 import example.composeapp.generated.resources.rotate_right
+import example.composeapp.generated.resources.zoom_in
+import example.composeapp.generated.resources.zoom_out
+import example.composeapp.generated.resources.remove
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import kotlin.math.PI
@@ -87,7 +96,7 @@ private fun globalOffsetChange(offset: Offset, rotation: Float): Offset = when(r
     270f -> Offset(offset.y, -offset.x)
     else -> offset
 }
-fun changeOffsetWhenScale(zoomChange: Float, imageRealSize: Size, boxSizePx: Float, offset: Offset): Offset {
+private fun changeOffsetWhenScale(zoomChange: Float, imageRealSize: Size, boxSizePx: Float, offset: Offset): Offset {
     val oneMinusSizeChange = (1 - zoomChange)
     val offsetX2 = offset * 2f
 
@@ -107,11 +116,11 @@ fun changeOffsetWhenScale(zoomChange: Float, imageRealSize: Size, boxSizePx: Flo
 fun ImageCropDialog(
     bytes: ByteArray,
     boxSize: Dp,
-    onResult: (result: ImageBitmap?) -> Unit
+    onResult: (result: ByteArray?) -> Unit
 ) {
     val density = LocalDensity.current
-    val boxSizePx = remember(density){
-        with(density) { boxSize.toPx() }
+    val boxSizePx = remember(density) {
+        density.run { boxSize.toPx() }
     }
     val imageBitmap = remember(bytes) {
         ImageBitmap.fromByteArray(bytes).getResizedBitmap(boxSizePx.toInt())
@@ -131,36 +140,44 @@ fun ImageCropDialog(
             var rotation by remember { mutableFloatStateOf(0f) }
             var offset by remember { mutableStateOf(Offset.Zero) }
 
-            var imageRealSize by remember { mutableStateOf(imageBitmap.size() * scale) }
+            val imageDisplaySize by remember(scale, rotation) {
+                derivedStateOf {
+                    val size = imageBitmap.size() * scale
+                    if (rotation % 180 == 0f) size else size.swap()
+                }
+            }
+
+            fun calculateZoomChange(zoomChange: Float){
+                if (imageBitmap.minSize * scale * zoomChange >= boxSizePx) {
+                    offset += changeOffsetWhenScale(
+                        zoomChange,
+                        imageDisplaySize,
+                        boxSizePx,
+                        offset
+                    )
+                    scale *= zoomChange
+                }
+            }
 
             val state = rememberTransformableState { zoomChange, offsetChange, _ ->
                 offset = checkImageOffset(
                     offset,
                     globalOffsetChange(offsetChange * scale, rotation),
-                    imageRealSize - boxSizePx
+                    imageDisplaySize - boxSizePx
                 )
-                if (imageBitmap.minSize * scale * zoomChange >= boxSizePx) {
-                    offset += changeOffsetWhenScale(
-                        zoomChange,
-                        imageRealSize,
-                        boxSizePx,
-                        offset
-                    )
-                    imageRealSize *= zoomChange
-                    scale *= zoomChange
-                }
+                calculateZoomChange(zoomChange)
             }
 
             Image(
                 modifier = Modifier
                     .align(Alignment.Center)
-                    .graphicsLayer(
-                        scaleX = scale,
-                        scaleY = scale,
-                        rotationZ = rotation,
-                        translationX = offset.x,
+                    .graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                        rotationZ = rotation
+                        translationX = offset.x
                         translationY = offset.y
-                    )
+                    }
                     .transformable(state = state),
                 bitmap = imageBitmap,
                 contentDescription = stringResource(Res.string.character_image)
@@ -176,72 +193,33 @@ fun ImageCropDialog(
                     .align(Alignment.Center)
             )
 
-            Row (
+            RotateButtons(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primaryContainer),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    .background(MaterialTheme.colorScheme.primaryContainer)
             ) {
-                IconButton(onClick = {
-                    rotation = (rotation + 270) % 360
-                    imageRealSize = imageRealSize.swap()
-                }) {
-                    Icon (
-                        modifier = Modifier.mirrorHorizontal(),
-                        painter = painterResource(Res.drawable.rotate_90_degrees_cw),
-                        contentDescription = stringResource(Res.string.rotate_left)
-                    )
-                }
-                IconButton(onClick = {
-                    rotation = (rotation + 90) % 360
-                    imageRealSize = imageRealSize.swap()
-                }) {
-                    Icon (
-                        painter = painterResource(Res.drawable.rotate_90_degrees_cw),
-                        contentDescription = stringResource(Res.string.rotate_right)
-                    )
-                }
+                rotation = (rotation + it) % 360
             }
-            Row (
+            ZoomButtons(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primaryContainer)
+            ) { calculateZoomChange(it) }
+            ControlButtons(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .clip(CircleShape)
                     .background(MaterialTheme.colorScheme.primaryContainer),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                IconButton(
-                    onClick = { onResult(null) }
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Clear,
-                        contentDescription = stringResource(Res.string.cancel)
-                    )
-                }
-                IconButton(
-                    onClick = {
-                        scale = 1f
-                        imageRealSize = imageBitmap.intSize().toSize()
-                        rotation = 0f
-                        offset = Offset.Zero
-                    }
-                ) {
-                    Icon(
-                        painter = painterResource(Res.drawable.restart_alt),
-                        contentDescription = stringResource(Res.string.discard_changes)
-                    )
-                }
-                IconButton(
-                    onClick = {
-                        onResult(cropImage(imageBitmap, scale, offset, rotation, boxSizePx))
-                    }
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Check,
-                        contentDescription = stringResource(Res.string.finish)
-                    )
-                }
-            }
+                onCancel = { onResult(null) },
+                onClear = {
+                    scale = 1f
+                    rotation = 0f
+                    offset = Offset.Zero
+                },
+                onResult = { onResult(cropImage(imageBitmap, scale, offset, rotation, boxSizePx)) }
+            )
         }
     }
 }
@@ -254,11 +232,13 @@ private fun ImageBitmap.getResizedBitmap(minSize: Int): ImageBitmap {
         (minSize * bitmapRatio).toInt() to minSize
     }
     return ImageBitmap(newWidth, newHeight).also { scaledBitmap ->
-        Canvas(scaledBitmap).drawImageRect(
-            image = this,
-            dstSize = IntSize(newWidth, newHeight),
-            paint = Paint()
-        )
+        Canvas(scaledBitmap).apply {
+            drawImageRect(
+                image = this@getResizedBitmap,
+                dstSize = IntSize(newWidth, newHeight),
+                paint = Paint()
+            )
+        }
     }
 }
 
@@ -267,8 +247,9 @@ private fun cropImage(
     scale: Float,
     offset: Offset,
     rotation: Float,
-    boxSize: Float
-): ImageBitmap {
+    boxSize: Float,
+    targetImageSize: Int = (boxSize / scale).toInt()
+): ByteArray {
 
     val imageSize = source.intSize()
     val resultImageSize = (boxSize / scale).toInt()
@@ -280,15 +261,12 @@ private fun cropImage(
     val cos = -cos(rotationRadians)
     val sin = sin(rotationRadians)
 
-    val adjustedOffsetX = scaledOffset.x * cos - scaledOffset.y * sin + center.x
-    val adjustedOffsetY = scaledOffset.x * sin + scaledOffset.y * cos + center.y
-
     val targetImageOffset = Offset(
-        adjustedOffsetX - resultImageSize / 2f,
-        adjustedOffsetY - resultImageSize / 2f
+        scaledOffset.x * cos - scaledOffset.y * sin + center.x - resultImageSize / 2f,
+        scaledOffset.x * sin + scaledOffset.y * cos + center.y - resultImageSize / 2f
     ).toIntOffset()
 
-    val bitmap = ImageBitmap(resultImageSize, resultImageSize).also {
+    val bitmap = ImageBitmap(targetImageSize, targetImageSize).also {
         Canvas(it).apply {
             save()
             translate(resultImageSize / 2f, resultImageSize / 2f)
@@ -299,11 +277,101 @@ private fun cropImage(
                 image = source,
                 srcOffset = targetImageOffset,
                 srcSize = IntSize(resultImageSize, resultImageSize),
-                dstSize = IntSize(resultImageSize, resultImageSize),
+                dstSize = IntSize(targetImageSize, targetImageSize),
                 paint = Paint()
             )
             restore()
         }
     }
-    return bitmap
+    return bitmap.toByteArray()
 }
+@Composable
+private fun RotateButtons(
+    modifier: Modifier = Modifier,
+    onRotate: (Int) -> Unit
+) {
+    Row (
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        IconButton(onClick = { onRotate(270) }) {
+            Icon (
+                modifier = Modifier.mirrorHorizontal(),
+                painter = painterResource(Res.drawable.rotate_90_degrees_cw),
+                contentDescription = stringResource(Res.string.rotate_left)
+            )
+        }
+        IconButton(onClick = { onRotate(90) }) {
+            Icon (
+                painter = painterResource(Res.drawable.rotate_90_degrees_cw),
+                contentDescription = stringResource(Res.string.rotate_right)
+            )
+        }
+    }
+}
+@Composable
+private fun ZoomButtons(
+    modifier: Modifier = Modifier,
+    onZoom: (Float) -> Unit
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        IconButton(
+            onClick = { onZoom(1.2f) }
+        ) {
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = stringResource(Res.string.zoom_in)
+            )
+        }
+        IconButton(
+            onClick = { onZoom(0.8f) }
+        ) {
+            Icon(
+                painter = painterResource(Res.drawable.remove),
+                contentDescription = stringResource(Res.string.zoom_out)
+            )
+        }
+    }
+}
+
+@Composable
+private fun ControlButtons(
+    modifier: Modifier = Modifier,
+    onCancel: () -> Unit,
+    onClear: () -> Unit,
+    onResult: () -> Unit
+) {
+    Row (
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        IconButton(
+            onClick = onCancel
+        ) {
+            Icon(
+                imageVector = Icons.Default.Clear,
+                contentDescription = stringResource(Res.string.cancel)
+            )
+        }
+        IconButton(
+            onClick = onClear
+        ) {
+            Icon(
+                painter = painterResource(Res.drawable.restart_alt),
+                contentDescription = stringResource(Res.string.discard_changes)
+            )
+        }
+        IconButton(
+            onClick = onResult
+        ) {
+            Icon(
+                imageVector = Icons.Default.Check,
+                contentDescription = stringResource(Res.string.finish)
+            )
+        }
+    }
+}
+
